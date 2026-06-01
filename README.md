@@ -12,6 +12,15 @@
 6. 使用 MiniMax-M2.7-highspeed 分析畢業條件
 7. 輸出 `generated/graduation_report.json` 與 `generated/graduation_report.md`
 
+**更新 (2026-06-01)**
+
+- 已將專案推上 GitHub: https://github.com/WeiChengTW/Graduation-Credit-Calculator
+- MOOCS 分頁提示：課程列表的分頁資訊在 `#pageToolbar`（例如顯示 `1 - 10 共 N 筆`），可用下列方式換頁：
+  - 點擊 `a[title="下一頁"]`（圖示按鈕）
+  - 在 `input.paginate-number` 填入目標頁碼並按 Enter
+  - 或在 `form#actFm` 設定 `form.page.value = 'N'` 後 `form.submit()`
+
+
 ---
 
 ## 檔案說明
