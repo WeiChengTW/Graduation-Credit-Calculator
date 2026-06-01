@@ -1,0 +1,16 @@
+.env
+venv/
+__pycache__/
+*.pyc
+
+generated/
+generated_test/
+rules_md/
+courses_detail*.csv
+moocs_courses*.txt
+graduation_report*.md
+graduation_report*.json
+graduation_report*.txt
+*.png
+logs/
+scratch/

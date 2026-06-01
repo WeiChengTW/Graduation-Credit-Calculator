@@ -1,0 +1,4 @@
+playwright
+pymupdf
+pymupdf4llm
+python-dotenv
