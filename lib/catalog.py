@@ -23,6 +23,7 @@ TERM_IDS = {
     (114, 1): 69,
     (114, 2): 70,
     (114, 3): 71,
+    (115, 1): 72,
 }
 
 OUTPUT_COLUMNS = [
@@ -36,6 +37,8 @@ OUTPUT_COLUMNS = [
     "學分",
     "上課時間",
     "課程類別",
+    "成績",
+    "是否通過",
 ]
 
 
@@ -93,7 +96,9 @@ def fetch_course(termid: int, sectionid: str) -> dict:
     return exact_matches[0]
 
 
-def detail_row(course: dict[str, str], data: dict) -> list:
+def detail_row(course: dict[str, str], data: dict, grade_rec: dict | None = None) -> list:
+    grade = grade_rec["grade"] if grade_rec else ""
+    passed = grade_rec["passed"] if grade_rec else ""
     return [
         f"{data.get('ACADMICYEAR', course['year'])}-{data.get('ACADMICTERM', course['term'])}",
         data.get("CALL_ID", ""),
@@ -105,7 +110,24 @@ def detail_row(course: dict[str, str], data: dict) -> list:
         data.get("CREDITS", ""),
         data.get("C_PTIME", ""),
         data.get("CLASSIFICATIONCATNAME", ""),
+        grade,
+        passed,
     ]
+
+
+def _find_grade(
+    grade_lookup: dict[tuple[str, str, str], dict],
+    year: str,
+    term: str,
+    name: str,
+) -> dict | None:
+    rec = grade_lookup.get((year, term, name))
+    if rec:
+        return rec
+    for (gy, gt, gn), gv in grade_lookup.items():
+        if gy == year and gt == term and (name in gn or gn in name):
+            return gv
+    return None
 
 
 def write_details(
@@ -113,9 +135,15 @@ def write_details(
     output_path: Path,
     delay: float,
     term_map: dict | None = None,
+    grades: list[dict[str, str]] | None = None,
 ) -> tuple[int, float, list[str]]:
     if not courses:
         raise ValueError("沒有課程可查詢。")
+
+    grade_lookup: dict[tuple[str, str, str], dict] = {}
+    if grades:
+        for g in grades:
+            grade_lookup[(g["year"], g["term"], g["name"])] = g
 
     rows = []
     errors = []
@@ -141,7 +169,8 @@ def write_details(
                     file=sys.stderr,
                 )
 
-            rows.append(detail_row(course, data))
+            grade_rec = _find_grade(grade_lookup, course["year"], course["term"], course["name"])
+            rows.append(detail_row(course, data, grade_rec))
             total_credits += float(data.get("CREDITS") or 0)
             print(f"[{index}/{len(courses)}] OK  {label}")
         except Exception as exc:
@@ -160,9 +189,13 @@ def write_details(
 
 
 def generate(
-    input_path: Path, output_path: Path, delay: float, term_map: dict | None = None
+    input_path: Path,
+    output_path: Path,
+    delay: float,
+    term_map: dict | None = None,
+    grades: list[dict[str, str]] | None = None,
 ) -> tuple[int, float, list[str]]:
     courses = read_courses(input_path)
     if not courses:
         raise ValueError(f"{input_path} 沒有解析到任何課程。")
-    return write_details(courses, output_path, delay, term_map)
+    return write_details(courses, output_path, delay, term_map, grades)

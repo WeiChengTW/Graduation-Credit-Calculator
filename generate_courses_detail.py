@@ -32,10 +32,11 @@ except ImportError:
     pass
 
 from lib.catalog import generate, write_details
+from lib.indexer import build_rules_index
 from lib.llm import call_llm_analyzer
 from lib.report import summarize_courses
 from lib.rules import convert_rule_pdfs
-from lib.scraper import scrape_moocs_courses
+from lib.scraper import scrape_moocs_courses, scrape_moocs_grades
 from lib.utils import get_llm_api_key
 
 
@@ -79,6 +80,11 @@ def main() -> int:
         default=None,
         help="Where to save scraped MOOCS list. Default: <output-dir>/moocs_courses.txt. Use empty string to skip.",
     )
+    parser.add_argument(
+        "--save-taken-courses",
+        default=None,
+        help="Where to save grade records CSV. Default: <output-dir>/taken_courses.csv. Use empty string to skip.",
+    )
 
     parser.add_argument(
         "--input",
@@ -110,19 +116,40 @@ def main() -> int:
         action="store_true",
         help="Only convert PDF rules to Markdown and exit.",
     )
+    parser.add_argument(
+        "--build-rules-index",
+        action="store_true",
+        help="Extract structured rules from PDFs into rules_index.json, then exit.",
+    )
+    parser.add_argument(
+        "--merge-rules-index",
+        action="store_true",
+        help="When building the index, merge into existing rules_index.json instead of overwriting. Useful for updating only 畢業學分.pdf without re-extracting shared PDFs.",
+    )
+    parser.add_argument(
+        "--rules-index",
+        default=None,
+        help="Path to rules_index.json. Default: <output-dir>/rules_index.json",
+    )
 
     parser.add_argument(
         "--analyze", action="store_true", help="Run LLM graduation rules analysis."
     )
     parser.add_argument(
-        "--llm-base-url", default="https://minnimax.chat/v1", help="LLM API base URL."
+        "--llm-base-url",
+        default=os.getenv("LLM_BASE_URL", "https://minnimax.chat/v1"),
+        help="LLM API base URL. Can also use LLM_BASE_URL.",
     )
     parser.add_argument(
         "--llm-api-key",
         default=get_llm_api_key(),
         help="LLM API key. Can also use MINIMAX_API_KEY or MINNIMAX_API_KEY.",
     )
-    parser.add_argument("--llm-model", default="MiniMax-M2.7", help="LLM model name.")
+    parser.add_argument(
+        "--llm-model",
+        default=os.getenv("LLM_MODEL", "MiniMax-M2.7"),
+        help="LLM model name. Can also use LLM_MODEL.",
+    )
     parser.add_argument(
         "--report-output",
         default=None,
@@ -166,7 +193,19 @@ def main() -> int:
             else output_dir / "moocs_courses.txt"
         )
     )
+    save_taken_courses_path = (
+        None
+        if args.save_taken_courses == ""
+        else (
+            Path(args.save_taken_courses)
+            if args.save_taken_courses
+            else output_dir / "taken_courses.csv"
+        )
+    )
     rules_md_dir = output_dir / "rules_md"
+    rules_index_path = (
+        Path(args.rules_index) if args.rules_index else output_dir / "rules_index.json"
+    )
     report_md_path = (
         Path(args.report_output)
         if args.report_output
@@ -210,6 +249,30 @@ def main() -> int:
         convert_rule_pdfs(rule_paths, rules_md_dir)
         return 0
 
+    # Build rules index
+    if args.build_rules_index:
+        if not args.llm_api_key:
+            print(
+                "請提供 --llm-api-key 或設定 MINIMAX_API_KEY / MINNIMAX_API_KEY 環境變數。",
+                file=sys.stderr,
+            )
+            return 1
+        md_paths: list[Path] = []
+        if args.rules:
+            rule_paths = [Path(p) for p in args.rules]
+            print(f"開始轉換 {len(rule_paths)} 份規則 PDF...", flush=True)
+            md_paths = convert_rule_pdfs(rule_paths, rules_md_dir)
+        elif rules_md_dir.exists():
+            md_paths = list(rules_md_dir.glob("*.md"))
+        if not md_paths:
+            print("找不到規則 Markdown 檔案。請提供 --rules <pdf_paths>。", file=sys.stderr)
+            return 1
+        build_rules_index(
+            md_paths, rules_index_path, args.llm_model, args.llm_base_url, args.llm_api_key,
+            merge=args.merge_rules_index,
+        )
+        return 0
+
     generated_course_details = False
     reused_existing_csv = False
 
@@ -217,17 +280,28 @@ def main() -> int:
         if args.scrape_moocs:
             username = args.moocs_user or input("MOOCS 帳號：").strip()
             password = args.moocs_password or getpass.getpass("MOOCS 密碼：")
-            save_path = save_moocs_path
             courses = scrape_moocs_courses(
                 username,
                 password,
                 headless=not args.headful,
                 max_pages=args.max_pages,
-                save_path=save_path,
+                save_path=save_moocs_path,
                 debug=args.debug,
             )
+            grades = None
+            try:
+                print("開始抓取 MOOCS 成績記錄...", flush=True)
+                grades = scrape_moocs_grades(
+                    username,
+                    password,
+                    headless=not args.headful,
+                    save_path=save_taken_courses_path,
+                    debug=args.debug,
+                )
+            except Exception as e:
+                print(f"警告：無法抓取成績記錄 ({e})，將略過成績欄位。", file=sys.stderr)
             count, total_credits, errors = write_details(
-                courses, output_path, args.delay, term_map
+                courses, output_path, args.delay, term_map, grades
             )
             generated_course_details = True
         elif args.analyze and output_path.exists():
@@ -296,6 +370,7 @@ def main() -> int:
                 report_json_path=report_json_path,
                 report_raw_path=report_raw_path,
                 debug=args.debug,
+                rules_index_path=rules_index_path,
             )
         except Exception as e:
             print(f"分析過程發生錯誤：{e}", file=sys.stderr)
@@ -305,6 +380,8 @@ def main() -> int:
     generated_files = [output_path]
     if save_moocs_path and save_moocs_path.exists():
         generated_files.insert(0, save_moocs_path)
+    if save_taken_courses_path and save_taken_courses_path.exists():
+        generated_files.insert(1, save_taken_courses_path)
     if args.analyze:
         generated_files.extend([report_json_path, report_md_path])
         if report_raw_path.exists():

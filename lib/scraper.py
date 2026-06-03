@@ -9,6 +9,9 @@ from lib.utils import ensure_parent, mask_identifier, normalize_key
 
 MOOCS_LOGIN_URL = "https://moocs.cgu.edu.tw/learn/index.php"
 MOOCS_COURSES_URL = "https://moocs.cgu.edu.tw/learn/mycourse/index.php"
+MOOCS_GRADES_URL = "https://moocs.cgu.edu.tw/learn/co_student_record.php"
+
+_GRADE_COURSE_RE = re.compile(r"^(\d{3})([123])-(.+)$")
 
 TEXT_COURSE_RE = re.compile(
     r"^\s*(?:\d+\.\s*)?(?P<year>\d{3})-(?P<term>[123])-(?P<name>.+)-(?P<section>[A-Z]?\d+)(?:-.+)?\s*$"
@@ -397,3 +400,126 @@ def scrape_moocs_courses(
         print(f"MOOCS 清單輸出：{save_path}")
 
     return courses
+
+
+def _is_passed(score: str) -> bool:
+    score = score.strip()
+    if not score:
+        return False
+    if score == "S":
+        return False
+    if score in ("P", "通過", "及格"):
+        return True
+    try:
+        return float(score) >= 60
+    except ValueError:
+        return False
+
+
+def parse_grade_rows(lines: list[str]) -> list[dict[str, str]]:
+    """Parse co_student_record.php innerText format.
+
+    Each course appears as 6 lines:
+        1142-物件導向軟體設計   ← YYYTT-name (year 3 digits + term 1 digit)
+        \\t
+        3                       ← credits
+        \\t
+        89                      ← grade (may be empty if not yet graded)
+        (blank)
+    """
+    results = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        m = _GRADE_COURSE_RE.match(line)
+        if m:
+            year = m.group(1)
+            term = m.group(2)
+            name = m.group(3)
+            # skip \t, read credits, skip \t, read grade
+            credits = lines[i + 2].strip() if i + 2 < len(lines) else ""
+            grade = lines[i + 4].strip() if i + 4 < len(lines) else ""
+            if re.match(r"^\d+\.?\d*$", credits):
+                results.append({
+                    "year": year,
+                    "term": term,
+                    "name": name,
+                    "credits": credits,
+                    "grade": grade,
+                    "passed": "True" if _is_passed(grade) else "False",
+                })
+                i += 6
+                continue
+        i += 1
+    return results
+
+
+def scrape_moocs_grades(
+    username: str,
+    password: str,
+    *,
+    headless: bool,
+    save_path: Path | None = None,
+    debug: bool = False,
+) -> list[dict[str, str]]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "需要先安裝 Playwright：python3 -m pip install playwright && python3 -m playwright install chromium"
+        ) from exc
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        context = browser.new_context(ignore_https_errors=True)
+        page = context.new_page()
+        page.goto(MOOCS_LOGIN_URL, wait_until="domcontentloaded")
+
+        username_input = locate_first(page, USERNAME_SELECTORS)
+        password_input = locate_first(page, PASSWORD_SELECTORS)
+        if username_input is None or password_input is None:
+            browser.close()
+            raise RuntimeError("找不到 MOOCS 登入欄位。")
+
+        username_input.fill(username)
+        password_input.fill(password)
+        submit = locate_first(page, SUBMIT_SELECTORS)
+        if submit is not None:
+            submit.click()
+        else:
+            password_input.press("Enter")
+
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            page.wait_for_timeout(1500)
+
+        page.goto(MOOCS_GRADES_URL, wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            page.wait_for_timeout(2000)
+
+        raw_text = page.evaluate("() => document.body.innerText")
+        browser.close()
+
+    raw_lines = raw_text.splitlines()
+    if debug:
+        print(f"DEBUG: grades page raw lines={len(raw_lines)}")
+
+    records = parse_grade_rows(raw_lines)
+    print(f"成績資料：解析到 {len(records)} 門課程")
+
+    if save_path:
+        ensure_parent(save_path)
+        with save_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["學年", "學期", "課程名稱", "學分", "成績", "是否通過"])
+            for r in records:
+                writer.writerow([
+                    r["year"], r["term"], r["name"],
+                    r["credits"], r["grade"], r["passed"],
+                ])
+        print(f"成績資料輸出：{save_path}")
+
+    return records
