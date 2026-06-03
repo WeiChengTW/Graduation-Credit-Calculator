@@ -12,6 +12,13 @@
 6. 使用 MiniMax-M2.7-highspeed 分析畢業條件
 7. 輸出 `generated/graduation_report.json` 與 `generated/graduation_report.md`
 
+**更新 (2026-06-03)**
+
+- 新增 `--build-rules-index`：將畢業規則 PDF 離線提取為結構化 `rules_index.json`，分析時只注入相關節錄，大幅降低 token 用量（~300K → ~20K）
+- 新增 `lib/indexer.py`：負責 offline RAG 索引建立（`build_rules_index`）與查詢（`query_rules`）
+- 支援多科系：`--rules` 換成對應科系的 PDF，`--build-rules-index` 重建索引即可，程式不寫死任何科系規則
+- 新增 `--merge-rules-index`：只更新畢業學分 PDF 而不重新提取通識/榮譽學程規則
+
 **更新 (2026-06-01)**
 
 - 已將專案推上 GitHub: https://github.com/WeiChengTW/Graduation-Credit-Calculator
@@ -28,6 +35,7 @@
 | 檔案 / 資料夾 | 說明 |
 |---|---|
 | [generate_courses_detail.py](generate_courses_detail.py) | 主程式 |
+| [lib/indexer.py](lib/indexer.py) | 離線規則索引建立（`build_rules_index`）與查詢（`query_rules`） |
 | [requirements.txt](requirements.txt) | Python 依賴套件 |
 | [data/rules/](data/rules/) | 使用者提供的畢業、通識、榮譽學程等規則 PDF |
 | [generated/](generated/) | 最新產生物，包含課程明細、轉換後規則、報告 |
@@ -37,6 +45,7 @@
 | `generated/moocs_courses.txt` | 從 MOOCS 爬到的課程清單 |
 | `generated/courses_detail.csv` | catalog API 查出的課程明細 |
 | `generated/rules_md/` | 畢業規則 PDF 轉出的 Markdown |
+| `generated/rules_index.json` | 從規則 Markdown 提取的結構化索引（`--build-rules-index` 產生） |
 | `generated/graduation_report.json` | LLM 回傳的結構化畢業檢查結果 |
 | `generated/graduation_report.md` | 給人看的 Markdown 報告 |
 | `generated/graduation_report.raw.txt` | LLM 回覆無法解析成 JSON 時的除錯檔 |
@@ -179,6 +188,41 @@ python3 generate_courses_detail.py \
 
 如果沒有加 `--reuse-existing-csv`，程式會避免默默分析舊 CSV。
 
+### 6. 建立規則索引（推薦，可大幅降低 token 用量）
+
+**第一步：離線建立索引**（只要規則 PDF 沒變就做一次即可）
+
+```bash
+python3 generate_courses_detail.py \
+  --rules data/rules/畢業學分.pdf data/rules/榮譽學程學生手冊_112入學適用.pdf 'data/rules/112學年度下學期通識課程表--適用112學年度(含)後入學學生.pdf' \
+  --build-rules-index
+```
+
+輸出：`generated/rules_index.json`（結構化規則，< 50 KB）
+
+**第二步：分析時自動使用索引**
+
+```bash
+python3 generate_courses_detail.py \
+  --reuse-existing-csv \
+  --analyze
+```
+
+程式會自動偵測 `generated/rules_index.json`。若存在則只把相關節錄（~20K tokens）傳給 LLM；若不存在則退回全文模式。
+
+### 7. 只更新部分規則（merge 模式）
+
+如果畢業學分 PDF 改版，但通識/榮譽學程規則不變，可以只重新提取畢業學分：
+
+```bash
+python3 generate_courses_detail.py \
+  --rules data/rules/畢業學分.pdf \
+  --build-rules-index \
+  --merge-rules-index
+```
+
+`--merge-rules-index` 會把新提取的結果合併進現有 `rules_index.json`，不會覆蓋其他科目的節錄。
+
 ---
 
 ## 輸出報告
@@ -244,6 +288,14 @@ python3 generate_courses_detail.py \
 | `--rules` | 畢業規則 PDF 路徑，可一次給多個 |
 | `--convert-rules-only` | 只轉 PDF 成 Markdown，不做課程查詢與分析 |
 
+### 規則索引（Rules Index）
+
+| 參數 | 說明 |
+|---|---|
+| `--build-rules-index` | 將 `--rules` 指定的 PDF 轉成結構化索引後結束（不分析） |
+| `--merge-rules-index` | 搭配 `--build-rules-index`，把新結果合併進現有索引而非覆蓋 |
+| `--rules-index PATH` | 指定 `rules_index.json` 路徑，預設 `<output-dir>/rules_index.json` |
+
 ### LLM 分析
 
 | 參數 | 說明 |
@@ -283,19 +335,30 @@ E-Learning 操作說明
 
 ## 不同科系怎麼用
 
-這個工具不把畢業規則寫死在程式裡。
+這個工具不把畢業規則寫死在程式裡——domain 對照表、學分門檻全從 `rules_index.json` 動態讀取。
 
-如果朋友是不同科系或不同入學年度，只要替換 `--rules` 後面的 PDF：
+換科系只需兩步：
+
+**Step 1：用該科系的畢業學分 PDF 重建索引**
+
+```bash
+python3 generate_courses_detail.py \
+  --rules data/rules/化材.pdf 'data/rules/112學年度下學期通識課程表--適用112學年度(含)後入學學生.pdf' \
+  --build-rules-index
+```
+
+通識課程表所有系共用，畢業學分 PDF 每系各換一次即可。
+
+**Step 2：照常分析**
 
 ```bash
 python3 generate_courses_detail.py \
   --scrape-moocs \
   --moocs-user bxxxxxxx \
-  --rules 朋友的畢業學分.pdf 朋友的通識課程表.pdf 朋友的其他抵免規則.pdf \
   --analyze
 ```
 
-LLM 會根據這些 PDF 轉出的 Markdown 動態判讀規則。
+索引若不存在，程式會回退到全文 Markdown 模式（高 token），並提示執行 `--build-rules-index`。
 
 ---
 
