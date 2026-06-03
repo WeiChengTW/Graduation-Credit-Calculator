@@ -78,7 +78,7 @@ python3 -m playwright install chromium
 ```bash
 CGU_MOOCS_USER=bxxxxxxx
 CGU_MOOCS_PASSWORD=你的MOOCS密碼
-MINNIMAX_API_KEY=你的MiniMax API Key
+CGU_LLM_API_KEY=你的長庚LLM API Key
 ```
 
 也可以不放密碼在 `.env`，執行時由程式互動輸入。
@@ -95,31 +95,38 @@ python3 generate_courses_detail.py \
   --scrape-moocs \
   --moocs-user bxxxxxxx \
   --rules data/rules/畢業學分.pdf data/rules/榮譽學程學生手冊_112入學適用.pdf 'data/rules/112學年度下學期通識課程表--適用112學年度(含)後入學學生.pdf' \
-  --analyze
+  --build-rules-index
 ```
 
-如果沒有把 `MINNIMAX_API_KEY` 放進 `.env`：
+建好索引之後分析（以後每次只需這步）：
 
 ```bash
 python3 generate_courses_detail.py \
-  --output-dir runs/william-112-cs \
   --scrape-moocs \
   --moocs-user bxxxxxxx \
-  --rules data/rules/畢業學分.pdf data/rules/榮譽學程學生手冊_112入學適用.pdf 'data/rules/112學年度下學期通識課程表--適用112學年度(含)後入學學生.pdf' \
+  --analyze
+```
+
+如果沒有把 `CGU_LLM_API_KEY` 放進 `.env`：
+
+```bash
+python3 generate_courses_detail.py \
+  --scrape-moocs \
+  --moocs-user bxxxxxxx \
   --analyze \
-  --llm-api-key '你的MiniMax API Key'
+  --llm-api-key '你的長庚LLM API Key'
 ```
 
 預設 LLM：
 
 ```text
-MiniMax-M2.7-highspeed
+gpt-5.4-mini
 ```
 
 預設 API base URL：
 
 ```text
-https://minnimax.chat/v1
+https://air.cgu.edu.tw/cgullmapi/v1
 ```
 
 ---
@@ -301,9 +308,9 @@ python3 generate_courses_detail.py \
 | 參數 | 說明 |
 |---|---|
 | `--analyze` | 啟用 LLM 畢業學分分析 |
-| `--llm-base-url` | LLM API base URL，預設 `https://minnimax.chat/v1` |
-| `--llm-api-key` | LLM API key，也可用 `MINNIMAX_API_KEY` |
-| `--llm-model` | LLM 模型，預設 `MiniMax-M2.7-highspeed` |
+| `--llm-base-url` | LLM API base URL，預設 `https://air.cgu.edu.tw/cgullmapi/v1` |
+| `--llm-api-key` | LLM API key，也可用 `CGU_LLM_API_KEY` |
+| `--llm-model` | LLM 模型，預設 `gpt-5.4-mini` |
 | `--report-output` | Markdown 報告輸出，預設 `generated/graduation_report.md` |
 | `--report-json-output` | JSON 報告輸出，預設 `generated/graduation_report.json` |
 | `--raw-report-output` | JSON 解析失敗時保存原始 LLM 回覆，預設 `generated/graduation_report.raw.txt` |
@@ -427,10 +434,10 @@ python3 -m pip install pymupdf pymupdf4llm
 
 確認：
 
-- `MINNIMAX_API_KEY` 是否正確
-- `--llm-base-url` 是否為 `https://minnimax.chat/v1`
-- 模型名稱是否為 `MiniMax-M2.7-highspeed`
-- 規則 Markdown 是否成功產生
+- `CGU_LLM_API_KEY` 是否正確（長庚 AIR 平台 API Key）
+- `--llm-base-url` 是否為 `https://air.cgu.edu.tw/cgullmapi/v1`
+- 模型名稱是否為 `gpt-5.4-mini`
+- 規則 Markdown 是否成功產生（先跑 `--build-rules-index`）
 
 ### 5. 報告說「無法判定」
 

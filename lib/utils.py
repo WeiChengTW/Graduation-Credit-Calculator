@@ -27,7 +27,11 @@ def resolve_existing_path(path: Path) -> Path | None:
 
 
 def get_llm_api_key() -> str | None:
-    return os.getenv("MINIMAX_API_KEY") or os.getenv("MINNIMAX_API_KEY")
+    return (
+        os.getenv("CGU_LLM_API_KEY")
+        or os.getenv("MINIMAX_API_KEY")
+        or os.getenv("MINNIMAX_API_KEY")
+    )
 
 
 def markdown_cell(value) -> str:

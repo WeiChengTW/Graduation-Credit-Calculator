@@ -12,7 +12,7 @@ Usage:
   python3 generate_courses_detail.py --scrape-moocs --moocs-user bxxxxxxx \\
     --rules 畢業學分.pdf \\
     --analyze \\
-    --llm-api-key "$MINNIMAX_API_KEY"
+    --llm-api-key "$CGU_LLM_API_KEY"
 """
 
 from __future__ import annotations
@@ -137,17 +137,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--llm-base-url",
-        default=os.getenv("LLM_BASE_URL", "https://minnimax.chat/v1"),
+        default=os.getenv("LLM_BASE_URL", "https://air.cgu.edu.tw/cgullmapi/v1"),
         help="LLM API base URL. Can also use LLM_BASE_URL.",
     )
     parser.add_argument(
         "--llm-api-key",
         default=get_llm_api_key(),
-        help="LLM API key. Can also use MINIMAX_API_KEY or MINNIMAX_API_KEY.",
+        help="LLM API key. Can also use CGU_LLM_API_KEY.",
     )
     parser.add_argument(
         "--llm-model",
-        default=os.getenv("LLM_MODEL", "MiniMax-M2.7"),
+        default=os.getenv("LLM_MODEL", "gpt-5.4-mini"),
         help="LLM model name. Can also use LLM_MODEL.",
     )
     parser.add_argument(
@@ -253,7 +253,7 @@ def main() -> int:
     if args.build_rules_index:
         if not args.llm_api_key:
             print(
-                "請提供 --llm-api-key 或設定 MINIMAX_API_KEY / MINNIMAX_API_KEY 環境變數。",
+                "請提供 --llm-api-key 或設定 CGU_LLM_API_KEY 環境變數。",
                 file=sys.stderr,
             )
             return 1
@@ -331,7 +331,7 @@ def main() -> int:
     if args.analyze:
         if not args.llm_api_key:
             print(
-                "請提供 --llm-api-key 或設定 MINIMAX_API_KEY / MINNIMAX_API_KEY 環境變數。",
+                "請提供 --llm-api-key 或設定 CGU_LLM_API_KEY 環境變數。",
                 file=sys.stderr,
             )
             return 1
